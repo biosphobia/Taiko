@@ -1,0 +1,72 @@
+osu file format v14
+
+[General]
+AudioFilename: audio.ogg
+AudioLeadIn: 0
+PreviewTime: 10000
+Countdown: 0
+SampleSet: Normal
+StackLeniency: 0.7
+Mode: 1
+LetterboxInBreaks: 0
+
+[Metadata]
+Title:Offset Calibration
+TitleUnicode:Offset Calibration
+Artist:TaikoMove
+ArtistUnicode:TaikoMove
+Creator:TaikoMove
+Version:Metronome
+Source:
+Tags:taikomove bundled
+BeatmapID:0
+BeatmapSetID:-1
+
+[Difficulty]
+HPDrainRate:5
+CircleSize:5
+OverallDifficulty:5
+ApproachRate:5
+SliderMultiplier:1.4
+SliderTickRate:1
+
+[Events]
+//Background and Video events
+//Break Periods
+
+[TimingPoints]
+2000,500.000000,4,1,0,80,1,0
+
+[HitObjects]
+256,192,2000,1,0,0:0:0:0:
+256,192,2500,1,0,0:0:0:0:
+256,192,3000,1,0,0:0:0:0:
+256,192,3500,1,8,0:0:0:0:
+256,192,4000,1,0,0:0:0:0:
+256,192,4500,1,0,0:0:0:0:
+256,192,5000,1,0,0:0:0:0:
+256,192,5500,1,8,0:0:0:0:
+256,192,6000,1,0,0:0:0:0:
+256,192,6500,1,0,0:0:0:0:
+256,192,7000,1,0,0:0:0:0:
+256,192,7500,1,8,0:0:0:0:
+256,192,8000,1,0,0:0:0:0:
+256,192,8500,1,0,0:0:0:0:
+256,192,9000,1,0,0:0:0:0:
+256,192,9500,1,8,0:0:0:0:
+256,192,10000,1,0,0:0:0:0:
+256,192,10500,1,0,0:0:0:0:
+256,192,11000,1,0,0:0:0:0:
+256,192,11500,1,8,0:0:0:0:
+256,192,12000,1,0,0:0:0:0:
+256,192,12500,1,0,0:0:0:0:
+256,192,13000,1,0,0:0:0:0:
+256,192,13500,1,8,0:0:0:0:
+256,192,14000,1,0,0:0:0:0:
+256,192,14500,1,0,0:0:0:0:
+256,192,15000,1,0,0:0:0:0:
+256,192,15500,1,8,0:0:0:0:
+256,192,16000,1,0,0:0:0:0:
+256,192,16500,1,0,0:0:0:0:
+256,192,17000,1,0,0:0:0:0:
+256,192,17500,1,8,0:0:0:0:

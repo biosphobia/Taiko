@@ -1,0 +1,10 @@
+first_beat/TaikoMove - First Beat (TaikoMove) [Easy].osu
+first_beat/TaikoMove - First Beat (TaikoMove) [Normal].osu
+first_beat/TaikoMove - First Beat (TaikoMove) [Hard].osu
+neon_festival/TaikoMove - Neon Festival (TaikoMove) [Easy].osu
+neon_festival/TaikoMove - Neon Festival (TaikoMove) [Normal].osu
+neon_festival/TaikoMove - Neon Festival (TaikoMove) [Hard].osu
+thunder_run/TaikoMove - Thunder Run (TaikoMove) [Easy].osu
+thunder_run/TaikoMove - Thunder Run (TaikoMove) [Normal].osu
+thunder_run/TaikoMove - Thunder Run (TaikoMove) [Hard].osu
+calibration/TaikoMove - Offset Calibration (TaikoMove) [Metronome].osu
