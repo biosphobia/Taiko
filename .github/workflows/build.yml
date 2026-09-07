@@ -1,0 +1,155 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.5"
+  GODOT_RELEASE: "stable"
+
+jobs:
+  native:
+    name: Native extension (Windows + Linux)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mingw-w64 libusb-1.0-0-dev libudev-dev g++ python3-pip
+          pip3 install --user scons
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache godot-cpp objects
+        uses: actions/cache@v4
+        with:
+          path: |
+            native/godot-cpp/bin
+            native/godot-cpp/gen
+            native/godot-cpp/src/**/*.os
+            native/godot-cpp/.sconsign.dblite
+          key: godot-cpp-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ hashFiles('native/SConstruct') }}
+
+      - name: Unit test hit detector
+        run: |
+          cd native
+          g++ -std=c++17 -O2 -Isrc tests/test_hit_detector.cpp src/hit_detector.cpp -o /tmp/test_hit
+          /tmp/test_hit
+
+      - name: Build Linux extension
+        run: cd native && scons platform=linux target=template_release -j"$(nproc)"
+
+      - name: Build Windows extension (mingw cross-compile)
+        run: cd native && scons platform=windows target=template_release use_mingw=yes -j"$(nproc)"
+
+      - name: Check Windows DLL dependencies
+        run: |
+          x86_64-w64-mingw32-objdump -p addons/taiko_hw/bin/libtaiko_hw.windows.template_release.x86_64.dll | grep "DLL Name"
+          x86_64-w64-mingw32-objdump -p addons/taiko_hw/bin/libtaiko_hw.windows.template_release.x86_64.dll | grep -q taiko_hw_library_init
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-bins
+          path: |
+            addons/taiko_hw/bin/*.dll
+            addons/taiko_hw/bin/*.so
+          if-no-files-found: error
+
+  export:
+    name: Test + export game
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-bins
+          path: addons/taiko_hw/bin
+
+      - name: Cache Godot
+        id: cache-godot
+        uses: actions/cache@v4
+        with:
+          path: ~/godot
+          key: godot-${{ env.GODOT_VERSION }}-${{ env.GODOT_RELEASE }}-v2
+
+      - name: Download Godot + export templates
+        if: steps.cache-godot.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          mkdir -p ~/godot
+          cd ~/godot
+          V="${GODOT_VERSION}-${GODOT_RELEASE}"
+          curl -sSL -o godot.zip "https://github.com/godotengine/godot/releases/download/${V}/Godot_v${V}_linux.x86_64.zip"
+          unzip -q godot.zip && rm godot.zip
+          mv Godot_v${V}_linux.x86_64 godot
+          chmod +x godot
+          curl -sSL -o templates.tpz "https://github.com/godotengine/godot/releases/download/${V}/Godot_v${V}_export_templates.tpz"
+          mkdir -p templates
+          unzip -q -j templates.tpz "templates/windows_release_x86_64.exe" "templates/windows_release_x86_64_console.exe" "templates/windows_debug_x86_64.exe" "templates/windows_debug_x86_64_console.exe" "templates/linux_release.x86_64" "templates/linux_debug.x86_64" -d templates
+          rm templates.tpz
+
+      - name: Install export templates
+        run: |
+          D=~/.local/share/godot/export_templates/${GODOT_VERSION}.${GODOT_RELEASE}
+          mkdir -p "$D"
+          cp ~/godot/templates/* "$D/"
+          ls -la "$D"
+
+      - name: Import project
+        run: ~/godot/godot --headless --path . --import || true
+
+      - name: Run logic tests
+        run: ~/godot/godot --headless --path . -s tests/run_tests.gd
+
+      - name: Run scene/gameplay smoke test
+        env:
+          TAIKO_TEST: "1"
+          TAIKO_HW_HEADLESS: "1"
+        run: timeout 600 ~/godot/godot --headless --path . res://tests/smoke.tscn
+
+      - name: Export Windows build
+        run: |
+          mkdir -p build/windows
+          ~/godot/godot --headless --path . --export-release "Windows Desktop" build/windows/TaikoMove.exe
+          ls -la build/windows
+
+      - name: Export Linux build
+        run: |
+          mkdir -p build/linux
+          ~/godot/godot --headless --path . --export-release "Linux" build/linux/TaikoMove.x86_64
+          ls -la build/linux
+
+      - name: Package
+        run: |
+          cp README.md LICENSE THIRD_PARTY.md build/windows/ 2>/dev/null || true
+          cp -r docs build/windows/ 2>/dev/null || true
+          cp README.md LICENSE THIRD_PARTY.md build/linux/ 2>/dev/null || true
+          cd build && zip -r TaikoMove-windows-x64.zip windows && zip -r TaikoMove-linux-x64.zip linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TaikoMove-windows-x64
+          path: build/TaikoMove-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TaikoMove-linux-x64
+          path: build/TaikoMove-linux-x64.zip
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/TaikoMove-windows-x64.zip
+            build/TaikoMove-linux-x64.zip
+          generate_release_notes: true
