@@ -203,6 +203,7 @@ func _build_controllers() -> void:
 	hb.add_child(b_swap)
 	_assign_label = _text("Assign which controller is which hand (needed for big notes). Unassigned controllers are used in the order they connect.", 20, Color(1, 1, 1, 0.75))
 	vb.add_child(_assign_label)
+	vb.add_child(_text("Tip: plug each controller in over USB once so its factory sensor calibration can be read and cached ('calibrated' above). It is reused over Bluetooth afterwards.", 19, Color(1, 1, 1, 0.75)))
 	vb.add_child(_text("Pairing a controller over Bluetooth (Windows):", 24, _t.accent))
 	vb.add_child(_text("Plug the controller in with a USB cable, then press 'Pair' next to it. Unplug it when asked and press its PS button until the light stays on. Registering with Windows needs TaikoMove to run as Administrator. PS4 Move controllers also work while they stay plugged in over USB.", 20))
 	_pair_row = HBoxContainer.new()

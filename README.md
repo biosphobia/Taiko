@@ -70,6 +70,11 @@ plugged in over USB.
 above the screen looking down at the space where you drum, so the drum surface is visible as an
 ellipse. Point the glowing spheres toward the camera.
 
+**Controller calibration**: each controller stores factory IMU calibration data that is only
+readable over USB. Plug every controller in once (the wizard's Controllers step shows
+"calibrated" when it was read); the data is cached and reused when the controller connects over
+Bluetooth. Without it the game auto-scales the sensors, which works but is less consistent.
+
 **Playing surface**: air drumming works out of the box. A pillow, drum practice pad or a table gives
 a sharper impact; switch *Hit mode* to *Surface* (or *Hybrid*) in Settings for that.
 
