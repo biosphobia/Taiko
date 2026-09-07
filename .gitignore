@@ -1,0 +1,23 @@
+# Godot
+.godot/
+build/
+*.tmp
+# Native build outputs (built by CI / scons)
+native/src/*.o
+native/src/*.os
+native/src/*.obj
+native/thirdparty/**/*.o
+native/thirdparty/**/*.os
+native/.sconsign.dblite
+native/godot-cpp/bin/
+native/godot-cpp/gen/
+native/godot-cpp/src/**/*.o
+native/godot-cpp/src/**/*.os
+native/godot-cpp/.sconsign.dblite
+addons/taiko_hw/bin/*.dll
+addons/taiko_hw/bin/*.so
+addons/taiko_hw/bin/*.dylib
+addons/taiko_hw/bin/*.a
+# OS
+.DS_Store
+Thumbs.db
