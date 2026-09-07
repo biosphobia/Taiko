@@ -95,11 +95,11 @@ bool HitDetector::feed(const ImuSample &s, HitEvent &out) {
 		valley = speed;
 	}
 
+	if (state == REFRACTORY && t >= refractory_until) {
+		state = IDLE; // fall through to arming on this same sample
+	}
 	switch (state) {
 		case REFRACTORY: {
-			if (t >= refractory_until) {
-				state = IDLE;
-			}
 			break;
 		}
 		case IDLE: {
@@ -135,6 +135,7 @@ bool HitDetector::feed(const ImuSample &s, HitEvent &out) {
 			}
 			if (state == ARMED && (t - arm_t) > (int64_t)(cfg.max_stroke_ms * 1000.0f)) {
 				state = IDLE; // slow wave, not a hit
+				valley = speed; // require a fresh rise before arming again
 			}
 			break;
 		}

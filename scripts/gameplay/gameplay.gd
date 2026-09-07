@@ -252,12 +252,13 @@ func _process(delta: float) -> void:
 	if chart == null or clock == null:
 		return
 	var now := clock.now_ms()
+	var jt := now + _input_offset # judged time: same clock the hits are converted with
 	lane.now_ms = now
 	lane.kiai = chart.kiai_at(now)
 	if not paused and not finished:
 		if Game.autoplay:
-			_autoplay(now)
-		judge.update(now)
+			_autoplay(jt)
+		judge.update(jt)
 	for ev in judge.drain_events():
 		_handle_event(ev)
 	score_label.text = str(judge.score)
@@ -276,7 +277,7 @@ func _process(delta: float) -> void:
 	status_label.text = st
 	flash_rect.color.a = maxf(0.0, flash_rect.color.a - delta * 3.0)
 	if not finished and not paused:
-		var done := judge.is_finished(now) and now > chart.last_time() + 1200.0
+		var done := judge.is_finished(jt) and now > chart.last_time() + 1200.0
 		if done or (clock.audio_finished() and now > chart.last_time()):
 			finished = true
 			_finish_at = now + 1200.0

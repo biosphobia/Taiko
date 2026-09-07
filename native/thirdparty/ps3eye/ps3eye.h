@@ -168,9 +168,9 @@ public:
 	bool getUSBPortPath(char *out_identifier, size_t max_identifier_length) const;
 	
 	// Get a frame from the camera. Notes:
-	// - If there is no frame available, this function will block until one is
+	// - Blocks up to ~100 ms for a frame; returns false if none arrived or the stream was stopped.
 	// - The output buffer must be sized correctly, depending out the output format. See EOutputFormat.
-	void getFrame(uint8_t* frame);
+	bool getFrame(uint8_t* frame);
 
 	uint32_t getWidth() const { return frame_width; }
 	uint32_t getHeight() const { return frame_height; }

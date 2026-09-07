@@ -23,9 +23,7 @@ jobs:
       - name: Install toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mingw-w64 libusb-1.0-0-dev libudev-dev g++ python3-pip
-          pip3 install --user scons
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          sudo apt-get install -y --no-install-recommends mingw-w64 libusb-1.0-0-dev libudev-dev g++ scons
 
       - name: Cache godot-cpp objects
         uses: actions/cache@v4
@@ -35,7 +33,7 @@ jobs:
             native/godot-cpp/gen
             native/godot-cpp/src/**/*.os
             native/godot-cpp/.sconsign.dblite
-          key: godot-cpp-${{ runner.os }}-${{ hashFiles('.gitmodules') }}-${{ hashFiles('native/SConstruct') }}
+          key: godot-cpp-${{ runner.os }}-${{ hashFiles('native/godot-cpp/gdextension/extension_api.json') }}-${{ hashFiles('native/SConstruct') }}
 
       - name: Unit test hit detector
         run: |

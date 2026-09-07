@@ -73,6 +73,7 @@ public:
 	bool read_bt_addrs(uint8_t controller[6], uint8_t host[6]);
 	bool set_host_bt_addr(const uint8_t host[6]);
 	bool read_calibration();
+	static void set_cache_dir(const std::string &dir);
 
 	static std::string btaddr_to_string(const uint8_t addr[6]);
 	static bool btaddr_from_string(const std::string &s, uint8_t out[6]);
@@ -110,6 +111,11 @@ private:
 	int rest_counter = 0;
 
 	hid_device_ *feature_handle() const { return handle_addr ? handle_addr : handle; }
+	bool acquire_calibration_blob(std::vector<uint8_t> &blob);
+	bool parse_calibration_blob(const uint8_t *blob);
+	bool load_cached_blob(std::vector<uint8_t> &blob);
+	void save_cached_blob(const std::vector<uint8_t> &blob);
+	std::string cache_path() const;
 	void decode_common(const unsigned char *buf);
 	void raw_to_sample(const unsigned char *buf, int frame, int64_t t, ImuSample &out);
 	void update_fallback_scale(int rax, int ray, int raz, int rgx, int rgy, int rgz);

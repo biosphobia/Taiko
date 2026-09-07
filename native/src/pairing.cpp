@@ -144,7 +144,7 @@ static BOOL CALLBACK auth_callback(LPVOID param, PBLUETOOTH_AUTHENTICATION_CALLB
 	return TRUE;
 }
 
-static bool authenticate(HANDLE radio, BLUETOOTH_DEVICE_INFO &info) {
+static bool authenticate(HANDLE radio, BLUETOOTH_DEVICE_INFO &info, std::atomic<bool> &cancel_flag) {
 	if (info.fAuthenticated) return true;
 	AuthState state{ radio, &info, CreateEventA(NULL, TRUE, FALSE, NULL) };
 	HBLUETOOTH_AUTHENTICATION_REGISTRATION reg = 0;
@@ -153,7 +153,9 @@ static bool authenticate(HANDLE radio, BLUETOOTH_DEVICE_INFO &info) {
 		DWORD r = BluetoothAuthenticateDeviceEx(NULL, radio, &info, NULL, MITMProtectionNotRequiredBonding);
 		if (r == ERROR_NO_MORE_ITEMS) ok = true;
 		else if (r == ERROR_SUCCESS || r == ERROR_IO_PENDING) {
-			WaitForSingleObject(state.done_event, 15000);
+			for (int i = 0; i < 150 && !cancel_flag.load(); i++) {
+				if (WaitForSingleObject(state.done_event, 100) == WAIT_OBJECT_0) break;
+			}
 			ok = info.fAuthenticated != FALSE;
 		}
 		BluetoothUnregisterAuthentication(reg);
@@ -184,7 +186,7 @@ void PairingSession::run() {
 		if (find_device(radio, move_addr, info, scan == 0)) {
 			if (wcscmp(info.szName, L"Motion Controller") == 0 || info.szName[0] == 0) {
 				bool auth_ok = true;
-				if (model_type == MODEL_ZCM2) auth_ok = authenticate(radio, info);
+				if (model_type == MODEL_ZCM2) auth_ok = authenticate(radio, info, cancel_flag);
 				if (auth_ok) {
 					for (int attempt = 0; attempt < 60 && !cancel_flag.load(); attempt++) {
 						if (BluetoothGetDeviceInfo(radio, &info) != ERROR_SUCCESS) break;

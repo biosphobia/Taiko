@@ -53,15 +53,20 @@ int64_t ReportClock::stamp(int64_t arrival, int seq) {
 
 	int64_t predicted = smooth + (int64_t)(period * d + 0.5);
 	int64_t err = arrival - predicted;
-	if (err > 40000 || err < -40000) {
-		// Stall or wrap: re-synchronize.
+	// The controller keeps emitting on its own schedule; a late delivery (Bluetooth retransmit or
+	// batching) does not move that schedule, so late arrivals are trusted to the prediction as long
+	// as the 4-bit sequence counter is still unambiguous (~14 reports). Early arrivals mean our
+	// estimate lags and are corrected immediately.
+	const int64_t late_limit = (int64_t)std::max(40000.0, 14.0 * period);
+	if (err < -40000 || err > late_limit) {
 		smooth = arrival;
 	} else {
 		double gain = (count < 200) ? 0.08 : 0.02;
+		if (err > 20000) gain = 0.005; // stalled delivery: barely move the schedule
 		smooth = predicted + (int64_t)(err * gain);
-		// Adapt the period slowly from the mean arrival spacing.
+		// Adapt the period slowly from the mean arrival spacing (ignoring stalls).
 		double measured = (double)(arrival - prev_arrival) / d;
-		if (measured > 1000.0 && measured < 40000.0) {
+		if (measured > 1000.0 && measured < 40000.0 && err < 20000 && err > -20000) {
 			double pg = (count < 200) ? 0.05 : 0.002;
 			period += (measured - period) * pg;
 		}
@@ -251,11 +256,66 @@ bool MoveDevice::set_host_bt_addr(const uint8_t host[6]) {
 	return res == (int)sizeof(bts);
 }
 
+static std::string g_cache_dir;
+
+void MoveDevice::set_cache_dir(const std::string &dir) {
+	g_cache_dir = dir;
+}
+
+std::string MoveDevice::cache_path() const {
+	if (g_cache_dir.empty() || serial_str.empty()) return "";
+	std::string name;
+	for (char c : serial_str) name += (c == ':') ? '_' : c;
+	return g_cache_dir + "/" + name + (model_type == MODEL_ZCM2 ? ".zcm2.cal" : ".zcm1.cal");
+}
+
+bool MoveDevice::load_cached_blob(std::vector<uint8_t> &blob) {
+	std::string p = cache_path();
+	if (p.empty()) return false;
+	FILE *f = fopen(p.c_str(), "rb");
+	if (!f) return false;
+	blob.assign(CAL_BLOCK * 3, 0);
+	size_t n = fread(blob.data(), 1, blob.size(), f);
+	fclose(f);
+	const size_t expected = (model_type == MODEL_ZCM1) ? (size_t)(CAL_BLOCK * 3 - 4) : (size_t)(CAL_BLOCK * 2 - 2);
+	return n == expected;
+}
+
+void MoveDevice::save_cached_blob(const std::vector<uint8_t> &blob) {
+	std::string p = cache_path();
+	if (p.empty()) return;
+	FILE *f = fopen(p.c_str(), "wb");
+	if (!f) return;
+	const size_t expected = (model_type == MODEL_ZCM1) ? (size_t)(CAL_BLOCK * 3 - 4) : (size_t)(CAL_BLOCK * 2 - 2);
+	fwrite(blob.data(), 1, std::min(expected, blob.size()), f);
+	fclose(f);
+}
+
 bool MoveDevice::read_calibration() {
 	cal = MoveCalibration();
 	if (!handle) return false;
-	unsigned char blob[CAL_BLOCK * 3];
-	memset(blob, 0, sizeof(blob));
+	std::vector<uint8_t> blob;
+	// The calibration report is reliable over USB; over Bluetooth it is often unavailable, so the
+	// blob captured over USB is cached per controller and reused.
+	if (!bluetooth) {
+		if (acquire_calibration_blob(blob) && parse_calibration_blob(blob.data())) {
+			save_cached_blob(blob);
+			return true;
+		}
+		return false;
+	}
+	if (load_cached_blob(blob) && parse_calibration_blob(blob.data())) return true;
+	if (acquire_calibration_blob(blob) && parse_calibration_blob(blob.data())) {
+		save_cached_blob(blob);
+		return true;
+	}
+	cal = MoveCalibration();
+	return false;
+}
+
+bool MoveDevice::acquire_calibration_blob(std::vector<uint8_t> &out) {
+	out.assign(CAL_BLOCK * 3, 0);
+	uint8_t *blob = out.data();
 	const int blocks = (model_type == MODEL_ZCM1) ? 3 : 2;
 	bool got[3] = { false, false, false };
 	for (int attempt = 0; attempt < blocks + 2; attempt++) {
@@ -277,7 +337,11 @@ bool MoveDevice::read_calibration() {
 		if (all) break;
 	}
 	for (int i = 0; i < blocks; i++) if (!got[i]) return false;
+	return true;
+}
 
+bool MoveDevice::parse_calibration_blob(const uint8_t *blob) {
+	cal = MoveCalibration();
 	int axlow, axhigh, aylow, ayhigh, azlow, azhigh;
 	if (model_type == MODEL_ZCM1) {
 		auto u = [&](int off) { return decode16_offset(blob, off); };

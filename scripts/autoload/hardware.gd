@@ -43,6 +43,9 @@ func _ready() -> void:
 		hw.button.connect(_on_button)
 		hw.controller_connected.connect(_on_connected)
 		hw.controller_disconnected.connect(_on_disconnected)
+		var cal_dir := ProjectSettings.globalize_path("user://calibration")
+		DirAccess.make_dir_recursive_absolute(cal_dir)
+		hw.set_calibration_dir(cal_dir)
 		if DisplayServer.get_name() != "headless" or OS.has_environment("TAIKO_HW_HEADLESS"):
 			hw.start()
 			available = hw.is_started()

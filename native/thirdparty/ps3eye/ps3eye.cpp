@@ -2,6 +2,7 @@
 #include "ps3eye.h"
 
 #include <thread>
+#include <chrono>
 #include <mutex>
 #include <condition_variable>
 #include <atomic>
@@ -435,8 +436,17 @@ public:
 		frame_buffer		((uint8_t*)malloc(frame_size * num_frames)),
 		head				(0),
 		tail				(0),
-		available			(0)
+		available			(0),
+		shutdown			(false)
 	{
+	}
+
+	// TaikoMove: wake up and release a consumer blocked in Dequeue (called before the queue goes away).
+	void Shutdown()
+	{
+		std::lock_guard<std::mutex> lock(mutex);
+		shutdown = true;
+		empty_condition.notify_all();
 	}
 
 	~FrameQueue()
@@ -480,12 +490,14 @@ public:
 		return new_frame;
 	}
 
-	void Dequeue(uint8_t* new_frame, int frame_width, int frame_height, PS3EYECam::EOutputFormat outputFormat)
+	bool Dequeue(uint8_t* new_frame, int frame_width, int frame_height, PS3EYECam::EOutputFormat outputFormat)
 	{		
 		std::unique_lock<std::mutex> lock(mutex);
 
-		// If there is no data in the buffer, wait until data becomes available
-		empty_condition.wait(lock, [this] () { return available != 0; });
+		// If there is no data in the buffer, wait (bounded) until data becomes available or the queue shuts down.
+		empty_condition.wait_for(lock, std::chrono::milliseconds(100), [this] () { return available != 0 || shutdown; });
+		if (shutdown || available == 0)
+			return false;
 
 		// Copy from internal buffer
 		uint8_t* source = frame_buffer + frame_size * tail;
@@ -506,6 +518,7 @@ public:
 		// Update tail and available count
 		tail = (tail + 1) % num_frames;
 		available--;
+		return true;
 	}
 	
 	void DebayerGray(int frame_width, int frame_height, const uint8_t* inBayer, uint8_t* outBuffer)
@@ -722,6 +735,7 @@ private:
 
 	std::mutex				mutex;
 	std::condition_variable	empty_condition;
+	bool shutdown;
 };
 
 // URBDesc
@@ -746,12 +760,15 @@ public:
 	{
 		debug("URBDesc destructor\n");
 		close_transfers();
+		delete frame_queue;
+		frame_queue = NULL;
 	}
 
 	bool start_transfers(libusb_device_handle *handle, uint32_t curr_frame_size)
 	{
 		// Initialize the frame queue
         frame_size = curr_frame_size;
+		delete frame_queue;
 		frame_queue = new FrameQueue(frame_size);
 
 		// Initialize the current frame pointer to the start of the buffer; it will be updated as frames are completed and pushed onto the frame queue
@@ -806,8 +823,8 @@ public:
 		free(transfer_buffer);
 		transfer_buffer = NULL;
 
-		delete frame_queue;
-		frame_queue = NULL;
+		// TaikoMove: keep the queue alive (a consumer may still be inside Dequeue); just wake it up.
+		frame_queue->Shutdown();
 	}
 
 	void transfer_canceled()
@@ -1214,9 +1231,11 @@ uint32_t PS3EYECam::getOutputBytesPerPixel() const
 	return 0;
 }
 
-void PS3EYECam::getFrame(uint8_t* frame)
+bool PS3EYECam::getFrame(uint8_t* frame)
 {
-	urb->frame_queue->Dequeue(frame, frame_width, frame_height, frame_output_format);
+	if (!urb || !urb->frame_queue)
+		return false;
+	return urb->frame_queue->Dequeue(frame, frame_width, frame_height, frame_output_format);
 }
 
 bool PS3EYECam::open_usb()

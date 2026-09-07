@@ -18,6 +18,7 @@ var _info_label: Label
 var _assign_state := -1 ## -1 idle, 0 waiting left, 1 waiting right
 var _assign_label: Label
 var _pair_status: Label
+var _pair_row: HBoxContainer
 var _pair_active := false
 var _meter: Control
 var _calib_strengths: Array = []
@@ -72,7 +73,9 @@ func _ready() -> void:
 	hb.add_child(_b_back)
 	_b_next = UiTheme.make_button("Next", 24)
 	_b_next.custom_minimum_size = Vector2(200, 52)
-	_b_next.pressed.connect(func(): _go(step + 1))
+	_b_next.pressed.connect(func():
+		if step < STEPS.size() - 1:
+			_go(step + 1))
 	hb.add_child(_b_next)
 	_b_skip = UiTheme.make_button("Exit wizard", 24)
 	_b_skip.custom_minimum_size = Vector2(200, 52)
@@ -96,10 +99,31 @@ func _clear() -> void:
 	for c in _content.get_children():
 		c.queue_free()
 	_assign_state = -1
-	_calib_active = false
+	if _calib_active:
+		_calib_active = false
+		Hardware.apply_hit_config()
 	_auto_exposure = false
 	_sample_hand = -1
 	_offset_running = false
+	# references into the freed step
+	_info_label = null
+	_assign_label = null
+	_pair_status = null
+	_pair_row = null
+	_meter = null
+	_calib_label = null
+	_threshold_slider = null
+	_min_peak_slider = null
+	_preview = null
+	_preview_tex = null
+	_overlay = null
+	_cam_status = null
+	_exposure_slider = null
+	_gain_slider = null
+	_drum_label = null
+	_drum_test_label = null
+	_offset_label = null
+	_flash_rect = null
 	if _clock != null:
 		_clock.stop()
 		_clock.queue_free()
@@ -114,8 +138,8 @@ func _go(s: int) -> void:
 	_header.text = "Setup %d/%d: %s" % [step + 1, STEPS.size(), STEPS[step]]
 	_b_back.disabled = step == 0
 	_b_next.text = "Finish" if step == STEPS.size() - 1 else "Next"
-	if step == STEPS.size() - 1:
-		_b_next.pressed.disconnect(_go_next) if _b_next.pressed.is_connected(_go_next) else null
+	if _b_next.pressed.is_connected(_finish):
+		_b_next.pressed.disconnect(_finish)
 	match step:
 		0: _build_welcome()
 		1: _build_controllers()
@@ -125,10 +149,6 @@ func _go(s: int) -> void:
 		5: _build_offset()
 		6: _build_done()
 	_b_next.grab_focus()
-
-
-func _go_next() -> void:
-	_go(step + 1)
 
 
 func _text(text: String, size: int = 22, color: Color = Color(-1, 0, 0)) -> Label:
@@ -185,18 +205,17 @@ func _build_controllers() -> void:
 	vb.add_child(_assign_label)
 	vb.add_child(_text("Pairing a controller over Bluetooth (Windows):", 24, _t.accent))
 	vb.add_child(_text("Plug the controller in with a USB cable, then press 'Pair' next to it. Unplug it when asked and press its PS button until the light stays on. Registering with Windows needs TaikoMove to run as Administrator. PS4 Move controllers also work while they stay plugged in over USB.", 20))
-	var pair_row := HBoxContainer.new()
-	pair_row.add_theme_constant_override("separation", 12)
-	pair_row.name = "PairRow"
-	vb.add_child(pair_row)
+	_pair_row = HBoxContainer.new()
+	_pair_row.add_theme_constant_override("separation", 12)
+	vb.add_child(_pair_row)
 	_pair_status = _text("", 20, Color(1, 0.85, 0.5))
 	vb.add_child(_pair_status)
 	_refresh_controllers()
 
 
 func _refresh_controllers() -> void:
-	if _info_label == null or step != 1 or Hardware.hw == null:
-		if _info_label and Hardware.hw == null:
+	if not is_instance_valid(_info_label) or step != 1 or Hardware.hw == null:
+		if is_instance_valid(_info_label) and Hardware.hw == null:
 			_info_label.text = "Hardware extension not loaded: controllers unavailable."
 		return
 	var lines := []
@@ -214,8 +233,8 @@ func _refresh_controllers() -> void:
 			rate = 1e6 / float(live.get("period_us", 1.0))
 		lines.append("Slot %d  %s  %s  via %s   battery %s   %s   %.0f reports/s   [%s]" % [slot, hand_txt, str(info.get("model", "")), "Bluetooth" if bool(info.get("bluetooth", false)) else "USB", bat, "calibrated" if bool(info.get("calibrated", false)) else "no calibration data (using auto-scale)", rate, str(info.get("serial", ""))])
 	_info_label.text = "\n".join(lines)
-	var row := _content.find_child("PairRow", true, false)
-	if row:
+	var row := _pair_row
+	if is_instance_valid(row):
 		for c in row.get_children():
 			c.queue_free()
 		for slot in slots:
@@ -284,6 +303,9 @@ func _build_sensitivity() -> void:
 	b_cal.pressed.connect(func():
 		_calib_strengths.clear()
 		_calib_active = true
+		# Measure true stroke peaks: air mode, peak trigger (restored by apply_hit_config afterwards).
+		if Hardware.hw != null:
+			Hardware.hw.set_hit_config({"mode": 0, "trigger_point": 0})
 		_calib_label.text = "Hit the drum 8 times at your normal strength... 0/8")
 	row.add_child(b_cal)
 	_calib_label = UiTheme.make_label("Auto-calibration sets the thresholds from your own strokes (recommended).", 20, Color(1, 1, 1, 0.75))
@@ -332,12 +354,12 @@ func _draw_meter() -> void:
 	_meter.draw_string(f, Vector2(300, 215), "yellow = swing threshold, red = minimum peak, white = last peak", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1, 1, 1, 0.6))
 
 
-func _on_raw_hit(slot: int, _t: int, strength: float, _kind: int, _tracked: bool, _pos: Vector2) -> void:
+func _on_raw_hit(slot: int, _t: int, strength: float, kind: int, _tracked: bool, _pos: Vector2) -> void:
 	if step == 2:
 		var hand := Hardware.hand_for_slot(slot)
 		if hand >= 0:
 			_hit_counter[hand] += 1
-		if _calib_active:
+		if _calib_active and kind == 0 and is_instance_valid(_calib_label):
 			_calib_strengths.append(strength)
 			_calib_label.text = "Hit the drum 8 times at your normal strength... %d/8" % _calib_strengths.size()
 			if _calib_strengths.size() >= 8:
@@ -351,6 +373,7 @@ func _on_raw_hit(slot: int, _t: int, strength: float, _kind: int, _tracked: bool
 				Settings.set_value("min_peak", snappedf(mp, 0.1))
 				_threshold_slider.set_value_no_signal(thr)
 				_min_peak_slider.set_value_no_signal(mp)
+				Hardware.apply_hit_config()
 				_calib_label.text = "Done. Median stroke %.1f rad/s -> threshold %.1f, minimum peak %.1f" % [median, thr, mp]
 				Game.play_sfx("unlock")
 
@@ -359,7 +382,7 @@ func _on_drum_hit(hand: int, kind: int, _t: int, _s: float, source: String) -> v
 	if source != "move":
 		return
 	Game.play_sfx("don" if kind == 0 else "ka")
-	if step == 4 and _drum_test_label != null:
+	if step == 4 and is_instance_valid(_drum_test_label):
 		_zone_counts[kind] += 1
 		_drum_test_label.text = "%s hand: %s      (Don %d / Ka %d)" % ["LEFT" if hand == 0 else "RIGHT", "DON" if kind == 0 else "KA", _zone_counts[0], _zone_counts[1]]
 	if step == 5 and _offset_running and _clock != null:
@@ -537,7 +560,7 @@ func _draw_overlay() -> void:
 
 
 func _update_preview() -> void:
-	if _preview == null or Hardware.hw == null or not Hardware.camera_running():
+	if not is_instance_valid(_preview) or not is_instance_valid(_overlay) or Hardware.hw == null or not Hardware.camera_running():
 		return
 	var img: Image = Hardware.hw.camera_get_preview()
 	if img == null:
@@ -551,7 +574,8 @@ func _update_preview() -> void:
 
 
 func _auto_exposure_step() -> void:
-	if not _auto_exposure or Hardware.hw == null:
+	if not _auto_exposure or Hardware.hw == null or not is_instance_valid(_exposure_slider):
+		_auto_exposure = false
 		return
 	_auto_iter += 1
 	if _auto_iter % 8 != 0:
@@ -640,7 +664,7 @@ func _update_drum_label() -> void:
 
 
 func _capture_drum_point(slot: int) -> void:
-	if _drum_point >= 5 or Hardware.hw == null:
+	if _drum_point >= 5 or Hardware.hw == null or not is_instance_valid(_drum_label):
 		return
 	var hand := Hardware.hand_for_slot(slot) if slot >= 0 else -1
 	var preferred := hand
@@ -744,7 +768,6 @@ func _build_done() -> void:
 	lines.append("Input offset: %+.0f ms" % float(Settings.get_value("input_offset_ms")))
 	vb.add_child(_text("\n".join(lines), 24))
 	vb.add_child(_text("Press Finish to save. You can change everything later in Settings or by running this wizard again.", 20, Color(1, 1, 1, 0.7)))
-	_b_next.pressed.disconnect(_go_next) if _b_next.pressed.is_connected(_go_next) else null
 	if not _b_next.pressed.is_connected(_finish):
 		_b_next.pressed.connect(_finish)
 
@@ -771,7 +794,7 @@ func _process(delta: float) -> void:
 	elif step == 3 or step == 4:
 		_update_preview()
 		_auto_exposure_step()
-	elif step == 5 and _clock != null and _offset_running:
+	elif step == 5 and _clock != null and _offset_running and is_instance_valid(_flash_rect):
 		var t := _clock.now_ms()
 		var phase := fposmod(t - CAL_LEAD_IN, BEAT_MS)
 		_flash_rect.color = Color(1, 1, 1, 0.05 + 0.5 * maxf(0.0, 1.0 - phase / 120.0)) if t >= CAL_LEAD_IN - 1.0 else Color(1, 1, 1, 0.05)

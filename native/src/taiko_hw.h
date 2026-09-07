@@ -41,6 +41,7 @@ public:
 	bool is_started() const { return started.load(); }
 	int64_t get_ticks_usec() const;
 	String get_version() const;
+	void set_calibration_dir(const String &path);
 
 	// controllers
 	int get_slot_count() const { return MAX_SLOTS; }

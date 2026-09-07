@@ -28,6 +28,7 @@ void TaikoHW::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_started"), &TaikoHW::is_started);
 	ClassDB::bind_method(D_METHOD("get_ticks_usec"), &TaikoHW::get_ticks_usec);
 	ClassDB::bind_method(D_METHOD("get_version"), &TaikoHW::get_version);
+	ClassDB::bind_method(D_METHOD("set_calibration_dir", "path"), &TaikoHW::set_calibration_dir);
 
 	ClassDB::bind_method(D_METHOD("get_slot_count"), &TaikoHW::get_slot_count);
 	ClassDB::bind_method(D_METHOD("get_controller_info", "slot"), &TaikoHW::get_controller_info);
@@ -89,6 +90,10 @@ int64_t TaikoHW::get_ticks_usec() const {
 
 String TaikoHW::get_version() const {
 	return "taiko_hw 1.0";
+}
+
+void TaikoHW::set_calibration_dir(const String &path) {
+	taiko::MoveDevice::set_cache_dir(path.utf8().get_data());
 }
 
 void TaikoHW::start() {
@@ -168,18 +173,22 @@ void TaikoHW::open_new_devices() {
 		if (!ok) continue;
 		// Avoid duplicates by serial (Windows can expose a vanished device for a while).
 		bool dup = false;
-		for (int i = 0; i < MAX_SLOTS; i++) if (slots[i].connected.load() && slots[i].serial == dev->serial()) dup = true;
+		for (int i = 0; i < MAX_SLOTS; i++) {
+			if (!slots[i].connected.load()) continue;
+			std::lock_guard<std::mutex> lk(slots[i].mtx);
+			if (slots[i].serial == dev->serial()) dup = true;
+		}
 		if (dup) continue;
 		Slot &s = slots[free_slot];
 		s.path = entry.path;
-		s.serial = dev->serial();
-		s.model = (int)dev->model();
-		s.bluetooth = dev->is_bluetooth();
-		s.calibrated = dev->calibration().valid;
-		s.device = std::move(dev);
 		{
 			std::lock_guard<std::mutex> lk(cfg_mutex);
 			std::lock_guard<std::mutex> lk2(s.mtx);
+			s.serial = dev->serial();
+			s.model = (int)dev->model();
+			s.bluetooth = dev->is_bluetooth();
+			s.calibrated = dev->calibration().valid;
+			s.device = std::move(dev);
 			s.detector.set_config(default_cfg);
 			s.detector.reset();
 			s.buttons = 0; s.trigger = 0; s.battery = 0; s.reports = 0; s.period_us = 0;
@@ -200,7 +209,10 @@ void TaikoHW::reap_finished(bool join_all) {
 		if (s.thread.joinable() && (s.finished.load() || join_all)) {
 			s.stop_flag.store(true);
 			s.thread.join();
-			s.device.reset();
+			{
+				std::lock_guard<std::mutex> lk(s.mtx);
+				s.device.reset();
+			}
 			s.path.clear();
 			s.connected.store(false);
 		}
@@ -211,7 +223,10 @@ void TaikoHW::close_slot(int i) {
 	Slot &s = slots[i];
 	s.stop_flag.store(true);
 	if (s.thread.joinable()) s.thread.join();
-	s.device.reset();
+	{
+		std::lock_guard<std::mutex> lk(s.mtx);
+		s.device.reset();
+	}
 	s.path.clear();
 	if (s.connected.exchange(false)) {
 		Event e; e.type = 3; e.slot = i;
@@ -284,19 +299,21 @@ void TaikoHW::reader_loop(int idx) {
 				push_event(e);
 				prev_buttons = buttons;
 			}
-		} else if (now - last_report > 4000000) {
-			break; // no reports for 4 s: controller went away
+		} else if ((dev->is_bluetooth() || dev->report_count() > 0) && now - last_report > 4000000) {
+			// No reports for 4 s: the controller went away. (A PS3 Move over USB never streams
+			// reports at all, so it is kept alive for LED control and pairing.)
+			break;
 		}
 		// LEDs: apply changes promptly (rate limited) and refresh periodically so the bulb stays lit.
 		bool dirty = s.led_dirty.load();
 		if ((dirty && now - last_led > 30000) || (now - last_led > 2000000)) {
+			s.led_dirty.store(false); // claim first: a concurrent set_led() re-marks it dirty
 			uint32_t rgb = s.led_rgb.load();
-			if (dev->write_leds((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, s.rumble.load())) {
-				last_led = now;
-				if (dirty) s.led_dirty.store(false);
-			} else {
-				last_led = now; // don't spam on failure
+			uint8_t rum = s.rumble.load();
+			if (!dev->write_leds((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF, rum)) {
+				s.led_dirty.store(true);
 			}
+			last_led = now;
 		}
 	}
 	// Turn the light off when we leave (best effort).
@@ -316,13 +333,13 @@ Dictionary TaikoHW::get_controller_info(int slot) {
 	bool connected = s.connected.load();
 	d["connected"] = connected;
 	d["virtual"] = s.is_virtual.load();
-	d["serial"] = String(s.serial.c_str());
-	d["model"] = s.model == 1 ? "ZCM2" : "ZCM1";
-	d["bluetooth"] = s.bluetooth;
-	d["calibrated"] = s.calibrated;
 	uint8_t bat;
 	{
 		std::lock_guard<std::mutex> lk(s.mtx);
+		d["serial"] = String(s.serial.c_str());
+		d["model"] = s.model == 1 ? "ZCM2" : "ZCM1";
+		d["bluetooth"] = s.bluetooth;
+		d["calibrated"] = s.calibrated;
 		bat = s.battery;
 	}
 	d["battery"] = (int)(bat <= 5 ? bat : 5);
@@ -527,9 +544,10 @@ bool TaikoHW::is_elevated() { return taiko::PairingSession::is_elevated(); }
 bool TaikoHW::pair_begin(int slot) {
 	if (slot < 0 || slot >= MAX_SLOTS) return false;
 	Slot &s = slots[slot];
-	if (!s.connected.load() || !s.device) return false;
-	// The reader thread owns the handle; pause it while we send feature reports.
+	if (!s.connected.load()) return false;
+	// Holding the slot mutex keeps the device alive (reap/close reset it under the same lock).
 	std::lock_guard<std::mutex> lk(s.mtx);
+	if (!s.device) return false;
 	return pairing.begin(s.device.get(), s.model);
 }
 
@@ -556,10 +574,13 @@ void TaikoHW::debug_add_virtual(int slot) {
 		s.detector.set_config(default_cfg);
 		s.detector.reset();
 	}
-	s.serial = "virtual-" + std::to_string(slot);
-	s.model = 1;
-	s.bluetooth = true;
-	s.calibrated = true;
+	{
+		std::lock_guard<std::mutex> lk2(s.mtx);
+		s.serial = "virtual-" + std::to_string(slot);
+		s.model = 1;
+		s.bluetooth = true;
+		s.calibrated = true;
+	}
 	s.is_virtual.store(true);
 	s.connected.store(true);
 	Event e; e.type = 2; e.slot = slot;

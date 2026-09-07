@@ -87,7 +87,7 @@ func audio_finished() -> bool:
 	return audio_started and not player.playing and not paused
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if not started or paused or player.stream == null:
 		return
 	var model := now_ms()
@@ -108,4 +108,5 @@ func _process(_delta: float) -> void:
 	if absf(diff) > 60.0:
 		_offset_ms += diff # snap on large discrepancies (stalls)
 	else:
-		_offset_ms += diff * 0.03 # slow PLL keeps the model locked to the audio clock without jitter
+		# slow PLL (0.5 s time constant, frame-rate independent) keeps the model locked to the audio clock without jitter
+		_offset_ms += diff * (1.0 - exp(-delta / 0.5))

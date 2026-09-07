@@ -155,7 +155,7 @@ void EyeTracker::loop() {
 	int fps_frames = 0;
 	while (!stop_requested.load()) {
 		if (!cam || !cam->isStreaming()) break;
-		cam->getFrame(frame_buf.data());
+		if (!cam->getFrame(frame_buf.data())) continue;
 		if (stop_requested.load()) break;
 		int64_t t = now();
 		// The frame was exposed roughly one frame period before it was delivered.
